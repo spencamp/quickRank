@@ -195,8 +195,8 @@
   // ========== Data & State ==========
   const premadeData = {
     SW: ["A New Hope","The Empire Strikes Back","Return of the Jedi","The Phantom Menace","Attack of the Clones","Revenge of the Sith","The Force Awakens","The Last Jedi","The Rise of Skywalker","Rogue One","Solo"],
-    DF: ["Nacho Cheese","Cool Ranch","Spicy Sweet Chili","Salsa Verde","Flamin' Hot Límón","Blaze","Jalapeño","Taco","Chile Cheese"],
-    PK: ["Bulbasaur","Charmander","Squirtle","Pikachu","Chikorita","Cyndaquil","Totodile","Treecko","Torchic"],
+    DF: ["Nacho Cheese","Cool Ranch","Spicy Sweet Chili","Salsa Verde","Flamin' Hot Limón","Blaze","Jalapeño","Taco","Chile Cheese"],
+    PK: ["Bulbasaur","Charmander","Squirtle","Pikachu","Chikorita","Cyndaquil","Totodile","Treecko","Torchic"]
     FF: ["Final Fantasy I","Final Fantasy II","Final Fantasy III","Final Fantasy IV","Final Fantasy V","Final Fantasy VI","Final Fantasy VII","Final Fantasy VIII","Final Fantasy IX","Final Fantasy X","Final Fantasy X-2","Final Fantasy XI","Final Fantasy XII","Final Fantasy XIII","Final Fantasy XIV","Final Fantasy XV","Final Fantasy XVI"]
   };
   let items = [], original = [], unfamiliar = [];
@@ -288,9 +288,6 @@
   premadeEl.addEventListener("change",()=>{ pasteEl.value = premadeEl.value? '' : pasteEl.value; updateStartBtn(); });
   pasteEl.addEventListener("input",()=>{ premadeEl.value = ''; updateStartBtn(); });
 
-  // Initialize button state on page load
-  updateStartBtn();
-
   // Load past rankings
   function loadPast() {
     pastListEl.innerHTML = '';
@@ -312,6 +309,7 @@
 
   // ========== Familiarity Screen ==========
   function showFamiliarity() {
+    // prepare original
     if (premadeEl.value) items = [...premadeData[premadeEl.value]];
     else items = pasteEl.value.trim().split("\n").filter(l=>l.trim());
     original = [...items];
@@ -356,7 +354,175 @@
     estimatedComparisons = Math.ceil(items.length * Math.log2(items.length));
     prepareMerge();
   }
-  // ... rest of script unchanged ...
+
+  // ========== Merge-Sort Interactive ==========
+  function prepareMerge() {
+    if (chunks.length === 1) {
+      cmpEl.classList.add('hidden');
+      startContradictionRound();
+      return;
+    }
+    let left = chunks.shift();
+    let right= chunks.shift();
+    currentMerge = {left, right, merged: [], i:0, j:0};
+    askComparison();
+  }
+  function askComparison() {
+    let {left, right, i, j} = currentMerge;
+    let a = left[i], b = right[j];
+    // transitive inference with random chance to show anyway
+    let skipInference = Math.random() < 0.33;
+    if (reachable(a,b) && !skipInference) { recordChoice(a,b,true); return; }
+    if (reachable(b,a) && !skipInference) { recordChoice(b,a,true); return; }
+    // prompt user
+    choiceA.textContent = a;
+    choiceB.textContent = b;
+    progressEl.textContent = `${completedComparisons} / ${estimatedComparisons} comparisons completed`;
+    choiceA.onclick = ()=> recordChoice(a,b,false);
+    choiceB.onclick = ()=> recordChoice(b,a,false);
+  }
+  function recordChoice(winner, loser, auto) {
+    addWin(winner,loser);
+    completedComparisons++;
+    let {left, right, i, j, merged} = currentMerge;
+    if (left[i] === winner) { merged.push(winner); currentMerge.i++; }
+    else { merged.push(winner); currentMerge.j++; }
+    if (currentMerge.i >= left.length) {
+      merged.push(...right.slice(currentMerge.j)); completeMerge();
+    } else if (currentMerge.j >= right.length) {
+      merged.push(...left.slice(currentMerge.i)); completeMerge();
+    } else {
+      askComparison();
+    }
+  }
+  function completeMerge() {
+    chunks.push(currentMerge.merged);
+    currentMerge = null;
+    prepareMerge();
+  }
+
+  // ========== Contradiction Round ==========
+  function startContradictionRound() {
+    contradictions = findContradictions();
+    if (contradictions.length === 0) {
+      cmpEl.classList.add('hidden');
+      showFinal();
+      return;
+    }
+    conEl.classList.remove('hidden');
+    resolveNextContradiction();
+  }
+  function resolveNextContradiction() {
+    if (contradictions.length === 0) {
+      conEl.classList.add('hidden');
+      showFinal();
+      return;
+    }
+    let [a,b] = contradictions.shift();
+    conA.textContent = a;
+    conB.textContent = b;
+    conProgressEl.textContent = `${contradictions.length} contradictions left`;
+    conA.onclick = ()=> { addWin(a,b); resolveNextContradiction(); };
+    conB.onclick = ()=> { addWin(b,a); resolveNextContradiction(); };
+  }
+
+  // ========== Final Reveal ==========
+  function showFinal() {
+    finalEl.classList.remove('hidden');
+    // compute points
+    let points = {};
+    items.forEach(i=> points[i] = graph[i].length);
+    let ranked = [...items].sort((a,b)=> points[b] - points[a]);
+    rankingListEl.innerHTML = '';
+    ranked.forEach((item, idx) => {
+      let pts = points[item];
+      let medal = idx===0?'🥇': idx===1?'🥈': idx===2?'🥉':'';
+      let div = document.createElement('div');
+      div.className = 'ranking-entry';
+      let text = `${idx+1}. ${medal} ${item}`;
+      if (showPointsEl.checked) text += ` — ${pts} pts`;
+      div.textContent = text;
+      rankingListEl.appendChild(div);
+    });
+    timestampEl.textContent = new Date().toLocaleString();
+    rawListEl.textContent = original.join("\n");
+    // Save session
+    saveSession(ranked, graph, turboEl.checked);
+  }
+
+  // ========== Copy & Restart Handlers ==========
+  copyListOnlyBtn.addEventListener('click',()=>{
+    let lines = [...rankingListEl.querySelectorAll('.ranking-entry')]
+      .map(div=> div.textContent.split(' ').slice(1).join(' '));
+    navigator.clipboard.writeText(lines.join("\n"));
+    copyListOnlyBtn.textContent = 'Copied!';
+    setTimeout(()=> copyListOnlyBtn.textContent = 'Copy List (Ranked Only)', 1000);
+  });
+  copyListAllBtn.addEventListener('click',()=>{
+    let rankedLines = [...rankingListEl.querySelectorAll('.ranking-entry')]
+      .map(div=> div.textContent.split(' ').slice(1).join(' '));
+    let lines = [...rankedLines, '', 'Unfamiliar Items:', ...unfamiliar];
+    navigator.clipboard.writeText(lines.join("\n"));
+    copyListAllBtn.textContent = 'Copied!';
+    setTimeout(()=> copyListAllBtn.textContent = 'Copy List (Including Unfamiliar)', 1000);
+  });
+  copyResultsBtn.addEventListener('click',()=>{
+    let text = `Title: ${document.getElementById('title').value}`;
+    text += `\nDate: ${timestampEl.textContent}`;
+    if (turboEl.checked) text += ` (Turbo Mode enabled)`;
+    text += `\n\n`;
+    [...rankingListEl.querySelectorAll('.ranking-entry')].forEach(div=> text += div.textContent + "\n");
+    text += "\nItems:\n" + original.join("\n");
+    navigator.clipboard.writeText(text);
+    copyResultsBtn.textContent = 'Copied!';
+    setTimeout(()=> copyResultsBtn.textContent = 'Copy Results', 1000);
+  });
+  restartBtn.addEventListener('click',()=>{
+    // reset UI & state
+    [landingEl, pastEl].forEach(el=> el.classList.remove('hidden'));
+    [famEl, cmpEl, conEl, finalEl].forEach(el=> el.classList.add('hidden'));
+    pasteEl.value = '';
+    premadeEl.value = '';
+    turboEl.checked = false;
+    updateStartBtn();
+    showPointsEl.checked = false;
+  });
+
+  // ========== Save & Load Past ==========
+  function saveSession(ranked, graphData, turbo) {
+    let key = 'ranking_' + Date.now();
+    let data = {
+      title: document.getElementById('title').value,
+      date: timestampEl.textContent,
+      ranked,
+      graph: graphData,
+      original,
+      unfamiliar,
+      turbo
+    };
+    let keys = JSON.parse(localStorage.getItem('ranking_keys')||'[]');
+    keys.push(key);
+    localStorage.setItem('ranking_keys', JSON.stringify(keys));
+    localStorage.setItem(key, JSON.stringify(data));
+    loadPast();
+  }
+  function showStored(key) {
+    let data = JSON.parse(localStorage.getItem(key));
+    [landingEl, famEl, cmpEl, conEl].forEach(el=> el.classList.add('hidden'));
+    finalEl.classList.remove('hidden');
+    showPointsEl.checked = false;
+    rankingListEl.innerHTML = '';
+    data.ranked.forEach((item, idx)=>{
+      let pts = data.graph[item]?.length || 0;
+      let medal = idx===0?'🥇': idx===1?'🥈': idx===2?'🥉':'';
+      let div = document.createElement('div');
+      div.className = 'ranking-entry';
+      div.textContent = `${idx+1}. ${medal} ${item}`;
+      rankingListEl.appendChild(div);
+    });
+    timestampEl.textContent = data.date;
+    rawListEl.textContent = data.original.join("\n");
+  }
   </script>
 </body>
 </html>
