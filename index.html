@@ -212,7 +212,151 @@
   function addWin(winner, loser) {
     graph[winner].push(loser);
   }
-... (rest of script unchanged) ...
+  function reachable(a,b, visited=new Set()) {
+    if (!graph[a]) return false;
+    if (graph[a].includes(b)) return true;
+    for (let nxt of graph[a]) {
+      if (!visited.has(nxt)) {
+        visited.add(nxt);
+        if (reachable(nxt,b,visited)) return true;
+      }
+    }
+    return false;
+  }
+  function findContradictions() {
+    let pairs = [];
+    for (let a of items) {
+      for (let b of items) {
+        if (a!==b && reachable(a,b) && reachable(b,a)) {
+          if (!pairs.some(p=> (p[0]===b&&p[1]===a))) pairs.push([a,b]);
+        }
+      }
+    }
+    return pairs;
+  }
+
+  // ========== UI Elements ==========
+  const landingEl = document.getElementById("landing");
+  const startBtn = document.getElementById("startBtn");
+  const premadeEl = document.getElementById("premade");
+  const pasteEl = document.getElementById("paste");
+  const turboEl = document.getElementById("turbo");
+  const estimateEl = document.getElementById("estimate");
+  const pastEl = document.getElementById("past");
+  const pastListEl = document.getElementById("pastList");
+
+  const famEl = document.getElementById("familiarity");
+  const famListEl = document.getElementById("famList");
+  const selectAllBtn = document.getElementById("selectAllBtn");
+  const deselectAllBtn = document.getElementById("deselectAllBtn");
+  const famContinueBtn = document.getElementById("famContinueBtn");
+
+  const cmpEl = document.getElementById("comparison");
+  const choiceA = document.getElementById("choiceA");
+  const choiceB = document.getElementById("choiceB");
+  const progressEl = document.getElementById("progress");
+
+  const conEl = document.getElementById("contradiction");
+  const conA = document.getElementById("conA");
+  const conB = document.getElementById("conB");
+  const conProgressEl = document.getElementById("conProgress");
+
+  const finalEl = document.getElementById("final");
+  const showPointsEl = document.getElementById("showPoints");
+  const rankingListEl = document.getElementById("rankingList");
+  const timestampEl = document.getElementById("timestamp");
+  const rawListEl = document.getElementById("rawList");
+  const copyListOnlyBtn = document.getElementById("copyListOnly");
+  const copyListAllBtn = document.getElementById("copyListAll");
+  const copyResultsBtn = document.getElementById("copyResults");
+  const restartBtn = document.getElementById("restartBtn");
+
+  // ========== Landing Logic ==========
+  function updateStartBtn() {
+    let count = 0;
+    if (premadeEl.value) count = premadeData[premadeEl.value].length;
+    else count = pasteEl.value.trim().split("\n").filter(l=>l.trim()).length;
+    startBtn.disabled = count < 2;
+    if (count >= 2) {
+      let est = Math.ceil(count * Math.log2(count));
+      estimateEl.textContent = `Estimated: ~${est} comparisons`;
+      estimateEl.classList.remove('hidden');
+    } else {
+      estimateEl.classList.add('hidden');
+    }
+  }
+  premadeEl.addEventListener("change",()=>{ pasteEl.value = premadeEl.value? '' : pasteEl.value; updateStartBtn(); });
+  pasteEl.addEventListener("input",()=>{ premadeEl.value = ''; updateStartBtn(); });
+
+  // Initialize button state on page load
+  updateStartBtn();
+
+  // Load past rankings
+  function loadPast() {
+    pastListEl.innerHTML = '';
+    let keys = JSON.parse(localStorage.getItem('ranking_keys')||'[]');
+    if (!keys.length) { pastEl.classList.add('hidden'); return; }
+    pastEl.classList.remove('hidden');
+    keys.forEach(key=>{
+      let data = JSON.parse(localStorage.getItem(key));
+      let div = document.createElement('div');
+      div.className = 'past-entry';
+      div.textContent = data.title + ' — ' + data.date + (data.turbo? ' (Turbo)' : '');
+      div.addEventListener('click',()=> showStored(key));
+      pastListEl.appendChild(div);
+    });
+  }
+  loadPast();
+
+  startBtn.addEventListener("click",()=> showFamiliarity());
+
+  // ========== Familiarity Screen ==========
+  function showFamiliarity() {
+    if (premadeEl.value) items = [...premadeData[premadeEl.value]];
+    else items = pasteEl.value.trim().split("\n").filter(l=>l.trim());
+    original = [...items];
+    famListEl.innerHTML = '';
+    items.forEach(item=>{
+      let li = document.createElement('li');
+      li.innerHTML = `<label><input type='checkbox' checked value='${item}'> ${item}</label>`;
+      famListEl.appendChild(li);
+    });
+    landingEl.classList.add('hidden');
+    famEl.classList.remove('hidden');
+    famContinueBtn.disabled = false;
+  }
+  selectAllBtn.addEventListener('click',()=>{
+    famListEl.querySelectorAll('input').forEach(cb=> cb.checked = true);
+    famContinueBtn.disabled = false;
+  });
+  deselectAllBtn.addEventListener('click',()=>{
+    famListEl.querySelectorAll('input').forEach(cb=> cb.checked = false);
+    famContinueBtn.disabled = true;
+  });
+  famEl.addEventListener('change',()=>{
+    let anyChecked = [...famListEl.querySelectorAll('input')].some(cb=> cb.checked);
+    famContinueBtn.disabled = !anyChecked;
+  });
+  famContinueBtn.addEventListener('click',()=>{
+    unfamiliar = [];
+    items = [...famListEl.querySelectorAll('input')]
+      .filter(cb=> cb.checked)
+      .map(cb=> cb.value);
+    original.forEach(i=>{ if (!items.includes(i)) unfamiliar.push(i); });
+    famEl.classList.add('hidden');
+    startComparison();
+  });
+
+  // ========== Start Comparison ==========
+  function startComparison() {
+    cmpEl.classList.remove('hidden');
+    resetGraph();
+    chunks = items.map(i=>[i]);
+    completedComparisons = 0;
+    estimatedComparisons = Math.ceil(items.length * Math.log2(items.length));
+    prepareMerge();
+  }
+  // ... rest of script unchanged ...
   </script>
 </body>
 </html>
